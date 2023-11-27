@@ -44,7 +44,6 @@ class PuzzleSolver:
             # Step 2: Execute Z3 with the temporary file
             z3_command = ["z3", temp_file_name]
             result = subprocess.run(z3_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            print(result)
 
             # Step 3: Capture the output
             output = result.stdout if result.stdout else result.stderr
@@ -67,6 +66,7 @@ class SolverGrader:
         self.example = example
         self.LLMapi = LLMapi
         self.conversation = [] if not self.example else [self.example, ""]
+        self.conv_length = 0 if not example else len(example)
 
   def get_grade(self, answer_key, llm_answer, smt_output):
         to_be_graded = [("Answer to be graded: " + llm_answer + "\nSMT-LIB Solver Output: " + smt_output + "\nAnswer Key: " +answer_key)]
@@ -127,8 +127,8 @@ class LLMApi:
         return structured_history
 
 
-solver_llm = LLMApi(role="Generate SMT-LIB code that encodes each fact, whether implict or explicit, in the following logic puzzle. Make sure to set the logic and check-sat and get-model.")
-grader_llm = LLMApi(role="Based on the answer to be graded, the SMT-LIB solver output use the answer key to grade it numerically in the form X/Y, where X is the number of correct assignments(from the answer to be graded) and Y is the total number of assignments(counted from the answer key).")
+solver_llm = LLMApi(role="Generate SMT-LIB code that encodes each fact, whether implicit or explicit, in the following logic puzzle, one by one. After you respond, you will receive the output of your SMT-LIB code in z3; use it to correct your mistakes in coding and encoding the puzzle constraints. Make sure to set the logic and check-sat and get-model. Write 'I am done.' in your response, along with the SMT code, when you are sure of your response and it is free of errors.")
+grader_llm = LLMApi(role="Based on the answer to be graded, the SMT-LIB solver output use the answer key to grade it numerically in the form X/Y, where X is the number of correct assignments(from the answer to be graded) and Y is the total number of assignments(counted from the answer key). Please give your thought process as well in calculating both X and Y.")
 solver = PuzzleSolver(solver_llm)
 grader = SolverGrader(grader_llm)
 
@@ -144,7 +144,14 @@ The trip with Zachary was after the kayaking vacation.
 The camping trip was 2 years before the vacation with James.'''
 
 # Use LLMApi to generate SMT-LIB code from the puzzle description
-full_response, smt_lib_code = solver.solve_puzzle(puzzle_description)
+next_input = puzzle_description
+max_conversation_length = 4
+for i in range(max_conversation_length):
+    full_response, smt_lib_code = solver.solve_puzzle(next_input)
+    if 'I am done.' in full_response:
+        break
+    next_input = solver.solve_with_z3(smt_lib_code)
+    print(full_response, next_input)
 
 print(full_response, smt_lib_code)
 # Solve the puzzle using Z3
