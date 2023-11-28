@@ -21,8 +21,8 @@ class PuzzleSolver:
         self.conversation = [] if not self.example else [self.example, ""]
     @staticmethod
     def extract_substring(s, b, e):
-        # Find the starting position of the substring 'b'
-        start = s.find(b)
+        # Find the last occurrence of the substring 'b'
+        start = s.rfind(b)
         if start == -1:
             return ""  # 'b' not found in 's'
 
@@ -127,25 +127,26 @@ class LLMApi:
         return structured_history
 
 
-solver_llm = LLMApi(role="Generate SMT-LIB code that encodes each fact, whether implicit or explicit, in the following logic puzzle, one by one. After you respond, you will receive the output of your SMT-LIB code in z3; use it to correct your mistakes in coding and encoding the puzzle constraints. Make sure to set the logic and check-sat and get-model. Write 'I am done.' in your response, along with the SMT code, when you are sure of your response and it is free of errors.")
+solver_llm = LLMApi(role="Generate SMT-LIB code that encodes each fact, whether implicit or explicit, in the following logic puzzle, one by one. After you respond, you will receive the output of your SMT-LIB code in z3; use it to correct your mistakes in coding. syntax and encoding the puzzle constraints. Make sure to set the logic and check-sat and get-model. Write 'I am done.' in your response, along with the SMT code, when you are sure of your response and it is free of errors.")
 grader_llm = LLMApi(role="Based on the answer to be graded, the SMT-LIB solver output use the answer key to grade it numerically in the form X/Y, where X is the number of correct assignments(from the answer to be graded) and Y is the total number of assignments(counted from the answer key). Please give your thought process as well in calculating both X and Y.")
 solver = PuzzleSolver(solver_llm)
 grader = SolverGrader(grader_llm)
 
 
-puzzle_description = '''Friends, Activities, Years
+puzzle_description = '''customers, cake shapes, delivery dates
 
-Dustin, James, Yvonne, Zachary
-camping, cycling, hang gliding, kayaking
-2001, 2002, 2003, 2004
-The vacation with Dustin is either the 2004 holiday or the hang gliding holiday.
-The kayaking trip was 2 years after the camping vacation.
-The trip with Zachary was after the kayaking vacation.
-The camping trip was 2 years before the vacation with James.'''
+Becker, Ingram, Keller, Massey
+bowling pin, rocket ship, sailboat, turtle
+October 5, October 6, October 7, October 8
+The October 8 delivery will be in the shape of a sailboat.
+The order shaped like a bowling pin will be delivered sometime before Mrs. Keller's cake.
+Mrs. Massey's cake will be delivered on October 8.
+The order shaped like a turtle is either Mrs. Becker's order or Mrs. Massey's cake.
+Mrs. Becker's cake will be delivered 1 day after the order shaped like a rocket ship.'''
 
 # Use LLMApi to generate SMT-LIB code from the puzzle description
 next_input = puzzle_description
-max_conversation_length = 4
+max_conversation_length = 6
 for i in range(max_conversation_length):
     full_response, smt_lib_code = solver.solve_puzzle(next_input)
     if 'I am done.' in full_response:
@@ -156,10 +157,10 @@ for i in range(max_conversation_length):
 print(full_response, smt_lib_code)
 # Solve the puzzle using Z3
 attempted_solution = solver.solve_with_z3(smt_lib_code)
-solution = '''Dustin went hang gliding in 2002
-James went kayaking in 2003
-Yvonne went camping in 2001
-Zachary went cycling in 2004'''
+solution = '''Becker, turtle, October 7
+Ingram, bowling pin, October 5
+Keller, rocket ship, October 6
+Massey, sailboat, October 8 '''
 full_response, grade = grader.get_grade(solution, attempted_solution, full_response)
 
 print("SMT-LIB Code:\n", smt_lib_code)
