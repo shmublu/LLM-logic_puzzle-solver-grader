@@ -34,6 +34,18 @@ class PuzzleSolver:
 
     def clear(self):
         self.conversation = [] if not self.example else [self.example, ""]
+    def getConversation(self):
+        """
+        Formats the conversation history into a string, labeling user and LLM entries.
+        
+        Returns:
+            str: A formatted string of the conversation.
+        """
+        conversation_str = ""
+        for i, entry in enumerate(self.conversation):
+            label = "User: " if i % 2 == 0 else "LLM: "
+            conversation_str += label + entry + "\n"
+        return conversation_str
     @staticmethod
     def extract_substring(s, b, e):
         # Find the last occurrence of the substring 'b'
@@ -191,14 +203,14 @@ for puzzle in puzzles:
     solution = puzzle.answers
     print(puzzle_description)
     solver_role_text = (
-    "Role: Encode logic puzzles into SMT-LIB code, considering all explicit and implicit facts. "
-    "Submit this code to the z3 solver and analyze the output. If the solver returns an error, "
-    "identify and correct any syntactical errors or constraint misinterpretations in your code. "
-    "Iteratively refine the code until the solver returns a valid solution that aligns with the puzzle's options. "
-    "If the solver's solution does not align with the original puzzle's options, reassess and refine the constraints to ensure they accurately reflect the puzzle's logic. "
-    "Only after submitting the SMT-LIB code to the z3 solver and receiving a model that you believe correctly solves the puzzle, "
-    "conclude your response with 'I am done.' along with the final, error-free SMT-LIB code."
-    )
+    "Role: Encode the logic puzzle given to you into SMT-LIB code, taking into account all explicit and implicit facts. Make sure to set-logic in your code."
+    "After encoding, I will submit the code to the z3 solver for analysis and return to you the output. If there is an error, "
+    "carefully correct any syntactical mistakes or misinterpretations of the puzzle constraints in your code. "
+    "Continuously refine your code and resubmit to me until I send you back a solution that precisely aligns with the puzzle's parameters. "
+    "The phrase 'I am done.' should only be used to conclude your response when you have submitted the SMT-LIB code to me, "
+    " you have received a model output, and are confident that this model accurately and completely solves the puzzle. "
+    "In your final response, include the phrase 'I am done.' followed by the correct, error-free SMT-LIB code."
+)
 
     grader_role_text = (
     "Role: Grade SMT-LIB solver outputs numerically. Use the answer key and the latest solver output "
@@ -227,9 +239,9 @@ for puzzle in puzzles:
     # Solve the puzzle using Z3
     attempted_solution = solver.solve_with_z3(latest_smt_code)
     #print(full_response, latest_smt_code, attempted_solution)
-
-    grading_full_response, grade = grader.get_grade(solution, full_response, attempted_solution)
-    csv_writer.writerow([puzzle_description, latest_smt_code, attempted_solution, full_response,grading_full_response, grade, solution])
+    full_convo = solver.getConversation()
+    grading_full_response, grade = grader.get_grade(solution, full_convo, attempted_solution)
+    csv_writer.writerow([puzzle_description, latest_smt_code, attempted_solution, full_convo,grading_full_response, grade, solution])
     print("SMT-LIB Code:\n", latest_smt_code)
     print("Solution:\n", attempted_solution)
     print("Grading Process: ", grading_full_response)
