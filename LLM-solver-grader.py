@@ -204,18 +204,15 @@ for puzzle in puzzles:
     print(puzzle_description)
     solver_role_text = (
     "Role: Encode the logic puzzle given to you into SMT-LIB code, taking into account all explicit and implicit facts. Make sure to set-logic in your code."
-    "After encoding, I will submit the code to the z3 solver for analysis and return to you the output. If there is an error, "
+    "After encoding, I will submit the last SMT-LIB code you have sent me to an SMT solver for analysis and return to you the output. If there is an error, "
     "carefully correct any syntactical mistakes or misinterpretations of the puzzle constraints in your code. "
-    "Continuously refine your code and resubmit to me until I send you back a solution that precisely aligns with the puzzle's parameters. "
-    "The phrase 'I am done.' should only be used to conclude your response when you have submitted the SMT-LIB code to me, "
-    " you have received a model output, and are confident that this model accurately and completely solves the puzzle. "
-    "In your final response, include the phrase 'I am done.' followed by the correct, error-free SMT-LIB code."
+    "Continuously refine your code and resubmit to me until I send you back a correct solution that precisely aligns with the puzzle's parameters. "
+    "Once you have sent the correct, error-free, final SMT-LIB code, only respond 'I am done.' from then on."
 )
-
     grader_role_text = (
-    "Role: Grade SMT-LIB solver outputs numerically. Use the answer key and the latest solver output "
+    "Role: Grade SMT-LIB solver outputs numerically. Use the answer key, the LLM conversation, the latest solver output "
     "to determine the score in the format X/Y. 'X' represents the number of correct assignments in the "
-    "given answer; attempt to interpret the solution and find X even if the SMT model contains errors. 'Y' is the total number of assignments as per "
+    "given answer, including partial credit; attempt to interpret the solution and find X even if the SMT model contains errors. 'Y' is the total number of assignments as per "
     "the answer key. Provide a detailed explanation of your thought process in calculating both X and Y."
     )
 
@@ -225,16 +222,23 @@ for puzzle in puzzles:
     grader = SolverGrader(grader_llm)
 
     # Use LLMApi to generate SMT-LIB code from the puzzle description
-    next_input = puzzle_description
-    max_conversation_length = 6
+    max_retries = 5
+    flag = False
+    max_conversation_length = 5
     latest_smt_code = ""
-    for i in range(max_conversation_length):
-        full_response, smt_lib_code = solver.solve_puzzle(next_input)
-        if smt_lib_code and "(set-logic" in smt_lib_code:
-            latest_smt_code = smt_lib_code
-        if 'I am done.' in full_response:
-            break
-        next_input = solver.solve_with_z3(latest_smt_code)
+
+    while max_retries > 0 and not flag:
+        solver.clear()
+        next_input = puzzle_description
+        for i in range(max_conversation_length):
+            full_response, smt_lib_code = solver.solve_puzzle(next_input)
+            if smt_lib_code and "(set-logic" in smt_lib_code:
+                latest_smt_code = smt_lib_code
+            next_input = solver.solve_with_z3(latest_smt_code)
+        if not ("error" in next_input):
+            flag = True
+        max_retries -= 1
+            
 
     # Solve the puzzle using Z3
     attempted_solution = solver.solve_with_z3(latest_smt_code)
