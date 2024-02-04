@@ -114,7 +114,7 @@ class SolverGrader:
             return None
 
 class LLMApi:
-    def __init__(self, role, model="gpt-4"):
+    def __init__(self, role, model="gpt-4-1106-preview"):
         self.client = OpenAI(organization='org-bY4lHDd6A0w5itFiXf15EdJ0',)
         self.model = model
         self.role = role
@@ -129,7 +129,7 @@ class LLMApi:
         # Generate the response
         response = self.client.chat.completions.create(
             model=self.model,
-            temperature=0.05,
+            temperature=0.01,
             messages=messages
         )
 
@@ -400,17 +400,21 @@ for puzzle in puzzles:
     # Use LLMApi to generate SMT-LIB code from the puzzle description
     max_retries = 5
     flag = False
-    max_conversation_length = 4
+    max_conversation_length = 6
     latest_smt_code = ""
 
     while max_retries > 0 and not flag:
         solver.clear()
         next_input = puzzle_description
-        for i in range(max_conversation_length):
-            full_response, smt_lib_code = solver.solve_puzzle(next_input)
-            if smt_lib_code and "(set-logic" in smt_lib_code:
-                latest_smt_code = smt_lib_code
-            next_input = solver.solve_with_z3(latest_smt_code)
+        try:
+            for i in range(max_conversation_length):
+                full_response, smt_lib_code = solver.solve_puzzle(next_input)
+                if smt_lib_code and "(set-logic" in smt_lib_code:
+                    latest_smt_code = smt_lib_code
+                next_input = solver.solve_with_z3(latest_smt_code)
+        except:
+            max_retries -= 1
+            continue
         if not ("error" in next_input):
             flag = True
         max_retries -= 1
