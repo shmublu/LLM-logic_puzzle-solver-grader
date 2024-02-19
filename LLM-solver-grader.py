@@ -5,158 +5,7 @@ import os
 from openai import OpenAI
 import datetime
 import csv
-
-class NaiveSolver:
-    def __init__(self, LLMapi, examples=None):
-        self.examples = examples
-        self.LLMapi = LLMapi
-        self.conversation = [example for example in self.examples] if self.examples else []
-    def solve_puzzle(self, prompt):
-        self.conversation.append(prompt)
-        response = self.LLMapi.get_response(self.conversation)
-        self.conversation.append(response)
-        return response
-    def clear(self):
-        self.conversation = [example for example in self.examples] if self.examples else []
-
-class PuzzleSolver:
-    def __init__(self, LLMapi, examples=None):
-        self.examples = examples
-        self.LLMapi = LLMapi
-        self.conversation = [example for example in self.examples] if self.examples else []
-
-    def solve_puzzle(self, prompt):
-        self.conversation.append(prompt)
-        response = self.LLMapi.get_response(self.conversation)
-        self.conversation.append(response)
-        query = self.extract_substring(response, "(set-logic", "(get-model)").replace('`', '')
-        return response, query
-
-    def clear(self):
-        self.conversation = self.conversation = [example for example in self.examples] if self.examples else []
-    def getConversation(self):
-        """
-        Formats the conversation history into a string, labeling user and LLM entries.
-
-        Returns:
-            str: A formatted string of the conversation.
-        """
-        conversation_str = ""
-        examples_length = len(self.examples) if self.examples else 0
-
-        for i, entry in enumerate(self.conversation):
-            if i < examples_length:
-                continue 
-            label = "User: " if i % 2 == 0 else "LLM: "
-            conversation_str += label + entry + "\n"
-        return conversation_str
-    @staticmethod
-    def extract_substring(s, b, e):
-        # Find the last occurrence of the substring 'b'
-        start = s.rfind(b)
-        if start == -1:
-            return ""  # 'b' not found in 's'
-
-        # Find the starting position of the substring 'e' after 'b'
-        end = s.find(e, start)
-        if end == -1:
-            return ""  # 'e' not found after 'b' in 's'
-
-        # Return the substring from 'b' to 'e' inclusive
-        # Add len(e) to include 'e' in the result
-        return s[start:end + len(e)]
-    def solve_with_z3(self,smt_lib_code):
-        try:
-            # Step 1: Create a temporary file
-            with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
-                temp_file_name = temp_file.name
-                temp_file.write(smt_lib_code)
-
-            # Step 2: Execute Z3 with the temporary file
-            z3_command = ["z3", temp_file_name]
-            result = subprocess.run(z3_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-            # Step 3: Capture the output
-            output = result.stdout if result.stdout else result.stderr
-
-        except Exception as e:
-            output = f"An error occurred: {e}"
-
-        finally:
-            # Clean up the temporary file
-            if os.path.exists(temp_file_name):
-                os.remove(temp_file_name)
-            pass
-
-        # Step 4: Return the output
-        return output
-
-
-class SolverGrader:
-  def __init__(self, LLMapi, example=None):
-        self.example = example
-        self.LLMapi = LLMapi
-        self.conversation = [] if not self.example else [self.example, ""]
-        self.conv_length = 0 if not example else len(example)
-
-  def get_grade(self, answer_key, llm_answer, smt_output):
-        to_be_graded = [("Answer to be graded: " + llm_answer + "\nSMT-LIB Solver Output: " + smt_output + "\nAnswer Key: " +answer_key)]
-        response = self.LLMapi.get_response(to_be_graded)
-        return response, self.extract_answer(response)
-
-  def extract_answer(self, s):
-        pattern = r'\b(\d{1,3})/(\d{1,3})\b'
-        matches = re.findall(pattern, s)
-        valid_fractions = [(x, y) for x, y in matches if int(x) <= int(y)]
-        if valid_fractions:
-            return '/'.join(valid_fractions[-1])
-        else:
-            return None
-
-class LLMApi:
-    def __init__(self, role, model="gpt-4-1106-preview"):
-        self.client = OpenAI(organization='org-bY4lHDd6A0w5itFiXf15EdJ0',)
-        self.model = model
-        self.role = role
-
-    def get_response(self, conversation_history):
-        # If there is existing conversation history, include it
-        messages = self.process_conversation_history(conversation_history) if conversation_history else []
-
-        # Adding the system instruction for the task
-        messages = [{"role": "system", "content": self.role}] + messages
-
-        # Generate the response
-        response = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0.01,
-            messages=messages
-        )
-
-        # Extract and return the SMT-LIB code
-        return response.choices[0].message.content
-
-    @staticmethod
-    def process_conversation_history(plaintext_history):
-        """
-        Processes a plaintext conversation history into a structured format.
-        
-        Args:
-        plaintext_history (list): A list of strings representing the conversation history, 
-                                  alternating between user and assistant messages.
-        
-        Returns:
-        list: A list of dictionaries representing the structured conversation.
-        """
-        structured_history = []
-        role = "user"  # Start with the assumption that the first message is from the user
-
-        for message in plaintext_history:
-            structured_history.append({"role": role, "content": message})
-            # Alternate between 'user' and 'assistant' for each message
-            role = "assistant" if role == "user" else "user"
-
-        return structured_history
+from solvers import NaiveSolver, PuzzleSolver, SolverGrader, PuzzleData, LLMApi 
 
 
 class PuzzleData:
@@ -197,237 +46,100 @@ def process_puzzles(directory_path):
 
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-csv_file_name = f'LLM-SMT_log_{timestamp}.csv'
+csv_file_name = f'LLM_log_{timestamp}.csv'
 csv_file = open(csv_file_name, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow(['Puzzle', 'SMT-LIB Code', 'Attempted Solution', 'Full LLM Convo' , 'Grading Process', 'Grade', 'Solution'])
-example = [("""User: Ages, names, lengths
 
-5, 10, 15, 20
-Barnabas, Bubba, Draco, Merlin
-9.4 feet, 10.2 feet, 12.0 feet, 14.0 feet
+example = [("""Movie-Genre: epic, superhero, zombie
+Transport: airplane, helicopter, roller
+1. Transport:airplane and Movie-Genre:superhero have different parity positions
+2. Transport:helicopter is not to the left of Movie-Genre:superhero
+3. Movie-Genre:epic is somewhere to the right of Movie-Genre:zombie
+4. Movie-Genre:superhero is somewhere to the right of Movie-Genre:epic
+"""
+), (""""User: Movie-Genre: epic, superhero, zombie
+Transport: airplane, helicopter, roller
+1. Transport:airplane and Movie-Genre:superhero have different parity positions
+2. Transport:helicopter is not to the left of Movie-Genre:superhero
+3. Movie-Genre:epic is somewhere to the right of Movie-Genre:zombie
+4. Movie-Genre:superhero is somewhere to the right of Movie-Genre:epic
+LLM: Let's start by understanding the clues:
 
-Merlin is somewhat older than Bubba.
-Merlin is 10.2 feet long.
-Bubba is 10 years older than the gator that is 14.0 feet long.
-Barnabas is 12.0 feet long."""
+1. Transport:airplane and Movie-Genre:superhero have different parity positions: This means that if one is in an odd-numbered position, the other is in an even-numbered position, or vice versa.
 
-), ("""Let's start by declaring all the constants required:
-- integer constants for every person's age.
-- integer constants for every person's length.
+2. Transport:helicopter is not to the left of Movie-Genre:superhero: This means that the helicopter is either in the same position as the superhero movie or to the right of it.
 
-(set-logic QF_LIA)
+3. Movie-Genre:epic is somewhere to the right of Movie-Genre:zombie: This means that the zombie movie is to the left of the epic movie.
 
-; Age of each person
-(declare-const Merlin_Age Int)
-(declare-const Bubba_Age Int)
-(declare-const Draco_Age Int)
-(declare-const Barnabas_Age Int)
+4. Movie-Genre:superhero is somewhere to the right of Movie-Genre:epic: This means that the epic movie is to the left of the superhero movie.
 
-; Length of each person
-(declare-const Merlin_Length Real)
-(declare-const Bubba_Length Real)
-(declare-const Draco_Length Real)
-(declare-const Barnabas_Length Real)
+From clues 3 and 4, we can deduce that the order of the movie genres is: zombie, epic, superhero.
 
-We'll explicit the conditions in the logic puzzle. The ages are in the set {5, 10, 15, 20} and lengths are in the set {9.4, 10.2, 12.0, 14.0}. Let's add these constraints first:
+Now, let's consider the transport. From clue 2, we know that the helicopter is not to the left of the superhero movie. Since the superhero movie is in the third position, the helicopter must also be in the third position.
 
-(assert (and
-(or (= Merlin_Age 5) (= Merlin_Age 10) (= Merlin_Age 15) (= Merlin_Age 20))
-(or (= Bubba_Age 5) (= Bubba_Age 10) (= Bubba_Age 15) (= Bubba_Age 20))
-(or (= Draco_Age 5) (= Draco_Age 10) (= Draco_Age 15) (= Draco_Age 20))
-(or (= Barnabas_Age 5) (= Barnabas_Age 10) (= Barnabas_Age 15) (= Barnabas_Age 20))
-))
+From clue 1, we know that the airplane and the superhero movie have different parity positions. Since the superhero movie is in the third position (an odd number), the airplane must be in the second position (an even number).
 
-(assert (and
-(or (= Merlin_Length 9.4) (= Merlin_Length 10.2) (= Merlin_Length 12.0) (= Merlin_Length 14.0))
-(or (= Bubba_Length 9.4) (= Bubba_Length 10.2) (= Bubba_Length 12.0) (= Bubba_Length 14.0))
-(or (= Draco_Length 9.4) (= Draco_Length 10.2) (= Draco_Length 12.0) (= Draco_Length 14.0))
-(or (= Barnabas_Length 9.4) (= Barnabas_Length 10.2) (= Barnabas_Length 12.0) (= Barnabas_Length 14.0))
-))
+This leaves the roller in the first position.
 
-Now let's add the constraints given in the puzzle:
+So, the final associations are:
 
-; Merlin is somewhat older than Bubba.
-(assert (> Merlin_Age Bubba_Age))
+1. Zombie - Roller
+2. Epic - Airplane
+3. Superhero - Helicopter
 
-; Merlin is 10.2 feet long.
-(assert (= Merlin_Length 10.2))
+ """)]
+grading_example = """
+The answer key provides four assignments, each with three parts: month, rocket name, and company. This gives us a total of 8 degrees of freedom (because the numbering of the months in this case does not matter), so Y = 8. If the ordering mattered, we would have a correct assignment for the months also, so Y would theoretically be 12.
 
-; Bubba is 10 years older than the gator that is 14.0 feet long.
-(assert (or (and (= Draco_Length 14.0) (= Bubba_Age (+ Draco_Age 10)))
-            (and (= Barnabas_Length 14.0) (= Bubba_Age (+ Barnabas_Age 10)))))
+Let's look at the answer key:
+January, Athios, SpaceZen
+February, Foltron, Omnipax
+March, Exatris, Vexatech
+April, Worul, Techtrin
 
-; Barnabas is 12.0 feet long.
-(assert (= Barnabas_Length 12.0))
+Let's compare the given answer to the answer key and score accordingly:
 
-Now let's ensure that they all have distinct ages and lengths:
+1. January - Athios - SpaceZen: This matches the answer key exactly, so we have 2 correct assignments (2 degrees of freedom in what to match with January even though there are 3 categories).
+2. February - Exatris - Techtrin: The answer key has February associated with Foltron and Omnipax. February does not match with either, so we have 0 correct assignments.
+3. March - Foltron - Vexatech: The answer key has March associated with Exatris and Vexatech. The company is correct, but the rocket name is not, so we have 1 correct assignments.
+4. April - Worul - Omnipax: The answer key has April associated with Worul and Techtrin. The rocket name is correct, but the company is not, so we have 1 correct assignments.
 
-; Distinct ages
-(assert (distinct Merlin_Age Bubba_Age Draco_Age Barnabas_Age))
+Adding these up, we have X = 2 + 0 + 1 + 1 , so X = 4.
 
-; Distinct lengths
-(assert (distinct Merlin_Length Bubba_Length Draco_Length Barnabas_Length))
+So, the score for this logic puzzle solution is X divided by Y, so it is 4/8.
 
-We close with the check-sat and get-model commands:
 
-(check-sat)
-(get-model)
- """), ("""(error ""line 10 column 34: logic does not support reals"")
-(error ""line 11 column 32: logic does not support reals"")
-(error ""line 12 column 32: logic does not support reals"")
-(error ""line 13 column 35: logic does not support reals"")
-(error ""line 15 column 2: unexpected character"")
-(error ""line 15 column 75: unexpected character"")
-(error ""line 15 column 89: unexpected character"")
-(error ""line 15 column 118: unexpected character"")
-(error ""line 15 column 140: unexpected character"")
-(error ""line 15 column 146: unexpected character"")
-(error ""line 25 column 7: unknown constant Merlin_Length"")
-(error ""line 31 column 7: unexpected character"")
-(error ""line 37 column 12: unknown constant Merlin_Length"")
-(error ""line 40 column 21: unknown constant Draco_Length"")
-(error ""line 44 column 12: unknown constant Barnabas_Length"")
-(error ""line 46 column 7: unexpected character"")
-(error ""line 52 column 19: unknown constant Merlin_Length"")
-sat
-(
-  (define-fun Merlin_Age () Int
-    15)
-  (define-fun Draco_Age () Int
-    10)
-  (define-fun Barnabas_Age () Int
-    20)
-  (define-fun Bubba_Age () Int
-    5)
-)"""), ("""Apologies for the incorrect logic - we're trying to model real numbers which are not supported in QF_LIA. We can resolve this issue by using the logic QF_LIRA (Quantifier-Free Linear Integer and Real Arithmetic) instead, which supports both integers and real numbers.
 
-Here's the corrected SMT-LIB code:
-
-```
-(set-logic QF_LIRA)
-
-; Age of each person
-(declare-const Merlin_Age Int)
-(declare-const Bubba_Age Int)
-(declare-const Draco_Age Int)
-(declare-const Barnabas_Age Int)
-
-; Length of each person
-(declare-const Merlin_Length Real)
-(declare-const Bubba_Length Real)
-(declare-const Draco_Length Real)
-(declare-const Barnabas_Length Real)
-
-; The ages are in the set {5, 10, 15, 20}
-(assert (and
-(or (= Merlin_Age 5) (= Merlin_Age 10) (= Merlin_Age 15) (= Merlin_Age 20))
-(or (= Bubba_Age 5) (= Bubba_Age 10) (= Bubba_Age 15) (= Bubba_Age 20))
-(or (= Draco_Age 5) (= Draco_Age 10) (= Draco_Age 15) (= Draco_Age 20))
-(or (= Barnabas_Age 5) (= Barnabas_Age 10) (= Barnabas_Age 15) (= Barnabas_Age 20))))
-
-; Lengths are in the set {9.4, 10.2, 12.0, 14.0}
-(assert (and
-(or (= Merlin_Length 9.4) (= Merlin_Length 10.2) (= Merlin_Length 12.0) (= Merlin_Length 14.0))
-(or (= Bubba_Length 9.4) (= Bubba_Length 10.2) (= Bubba_Length 12.0) (= Bubba_Length 14.0))
-(or (= Draco_Length 9.4) (= Draco_Length 10.2) (= Draco_Length 12.0) (= Draco_Length 14.0))
-(or (= Barnabas_Length 9.4) (= Barnabas_Length 10.2) (= Barnabas_Length 12.0) (= Barnabas_Length 14.0))))
-
-; Merlin is somewhat older than Bubba.
-(assert (> Merlin_Age Bubba_Age))
-
-; Merlin is 10.2 feet long.
-(assert (= Merlin_Length 10.2))
-
-; Bubba is 10 years older than the gator that is 14.0 feet long.
-(assert (or (and (= Draco_Length 14.0) (= Bubba_Age (+ Draco_Age 10)))
-            (and (= Barnabas_Length 14.0) (= Bubba_Age (+ Barnabas_Age 10)))))
-
-; Barnabas is 12.0 feet long.
-(assert (= Barnabas_Length 12.0))
-
-; Distinct ages
-(assert (distinct Merlin_Age Bubba_Age Draco_Age Barnabas_Age))
-
-; Distinct lengths
-(assert (distinct Merlin_Length Bubba_Length Draco_Length Barnabas_Length))
-
-(check-sat)
-(get-model)
-"""), ("""sat
-(
-  (define-fun Merlin_Age () Int
-    20)
-  (define-fun Bubba_Length () Real
-    (/ 47.0 5.0))
-  (define-fun Barnabas_Age () Int
-    10)
-  (define-fun Bubba_Age () Int
-    15)
-  (define-fun Merlin_Length () Real
-    (/ 51.0 5.0))
-  (define-fun Draco_Age () Int
-    5)
-  (define-fun Barnabas_Length () Real
-    12.0)
-  (define-fun Draco_Length () Real
-    14.0)
-)"""), "I am done."]
+"""
 puzzles = process_puzzles("./data/puzzles")
 for puzzle in puzzles:
     puzzle_description = puzzle.entities + "\n" + puzzle.clues
     solution = puzzle.answers
     print(puzzle_description)
     solver_role_text = (
-    "Role: Encode the logic puzzle given to you into SMT-LIB code, taking into account all explicit and implicit facts; explain your logic and what implicit facts you are encoding. Make sure to set-logic in your code."
-    "After encoding, I will submit the last SMT-LIB code you have sent me to an SMT solver for analysis and return to you the output. If there is an error, "
-    "carefully correct any syntactical mistakes or misinterpretations of the puzzle constraints in your code. "
-    "Continuously refine your code and resubmit to me until I send you back a correct solution that precisely aligns with the puzzle's parameters. "
-    "Once you have sent the correct, error-free, final SMT-LIB code, only respond 'I am done.' from then on."
+    "Role: Solve the logic puzzles you are given, assigning each item properly in accordance with the clues. Please explain your logic fully and spell out your train of thought, and format your answer meaningfully and clearly."
 )
     grader_role_text = (
-    "Role: Grade SMT-LIB solver outputs numerically. Use the answer key, the LLM conversation, the latest solver output "
-    "to determine the score in the format X/Y. 'X' represents the number of correct assignments in the "
-    "given answer, including partial credit; attempt to interpret the solution and find X even if the SMT model contains errors. 'Y' is the total number of assignments as per "
-    "the answer key. Provide a detailed explanation of your thought process in calculating both X and Y."
+    """Role: You are a logical and fair grader of logic puzzles. Your task involves grading two types of assignments: 'Category Matching' and 'Item Ordering'. 
+    In 'Category Matching' assignments, where items from various categories are matched together, each successful match between different categories earns points. 
+    The total points for each line are one less than the number of items to be matched, as matching an item to itself is not counted. For 'Item Ordering' assignments, points are awarded based on the correct order of items. You can tell it is an 'Item Ordering' assignment if the answer key is numbered.
+    Each correct placement in the sequence earns a point, making the total points for each line equal to the number of items to be ordered. Use the final answer as compared with the answer key to determine the score in the format X/Y. 
+    'X' is the number of points earned, and 'Y' is the total possible points for the assignment, calculated based on the specific grading criteria for each type of assignment. 
+    Provide a detailed explanation of your thought process in calculating both X and Y for each assignment. Remember, X must be less than or equal to Y."""
     )
-
     solver_llm = LLMApi(role=solver_role_text)
     grader_llm = LLMApi(role=grader_role_text)
-    solver = PuzzleSolver(solver_llm,example)
-    grader = SolverGrader(grader_llm)
-
-    # Use LLMApi to generate SMT-LIB code from the puzzle description
-    max_retries = 5
-    flag = False
-    max_conversation_length = 6
-    latest_smt_code = ""
-
-    while max_retries > 0 and not flag:
-        solver.clear()
-        next_input = puzzle_description
-        try:
-            for i in range(max_conversation_length):
-                full_response, smt_lib_code = solver.solve_puzzle(next_input)
-                if smt_lib_code and "(set-logic" in smt_lib_code:
-                    latest_smt_code = smt_lib_code
-                next_input = solver.solve_with_z3(latest_smt_code)
-        except:
-            max_retries -= 1
-            continue
-        if not ("error" in next_input):
-            flag = True
-        max_retries -= 1
+    solver = NaiveSolver(solver_llm, example)
+    grader = SolverGrader(grader_llm, grading_example)
+    full_response = solver.solve_puzzle(puzzle_description)
             
 
-    # Solve the puzzle using Z3
-    attempted_solution = solver.solve_with_z3(latest_smt_code)
     #print(full_response, latest_smt_code, attempted_solution)
     full_convo = solver.getConversation()
-    grading_full_response, grade = grader.get_grade(solution, full_convo, attempted_solution)
-    csv_writer.writerow([puzzle_description, latest_smt_code, attempted_solution, full_convo,grading_full_response, grade, solution])
-    print("SMT-LIB Code:\n", latest_smt_code)
-    print("Solution:\n", attempted_solution)
+    grading_full_response, grade = grader.get_grade(solution, full_convo)
+    csv_writer.writerow([puzzle_description, "", full_response, full_convo,grading_full_response, grade, solution])
+    print("Solution:\n", full_response)
     print("Grading Process: ", grading_full_response)
     print("Grade: ", grade)
 

@@ -16,7 +16,7 @@ def calculate_average(csv_file_path):
                         how_many_perfect += 1
                     total += fraction
                     count += 1
-                except ValueError:
+                except Exception:
                     # Skip rows where the 5th column cannot be converted to a fraction
                     continue
 
@@ -29,6 +29,6 @@ def calculate_average(csv_file_path):
         return "No valid data"
 
 # Replace 'yourfile.csv' with your actual file path
-csv_file_path = 'LLM-SMT_log_20231224_025544.csv'
+csv_file_path = 'naive/LLM-SMT_log_20240218_100404.csv'
 average = calculate_average(csv_file_path)
 print("Average:", average)
