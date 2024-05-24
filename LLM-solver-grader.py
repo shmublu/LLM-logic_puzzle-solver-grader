@@ -40,10 +40,10 @@ def process_puzzles(directory_path):
 
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-csv_file_name = f'LLM_log_{timestamp}.csv'
+csv_file_name = f'test-exp1-3.5-LLM_log_{timestamp}.csv'
 csv_file = open(csv_file_name, 'w', newline='')
 csv_writer = csv.writer(csv_file)
-csv_writer.writerow(['Grade', 'Puzzle', 'Obscured Answer Key', 'Solution', 'Attempted Solution', 'Full LLM Convo' , 'Grading Process'])
+csv_writer.writerow(['Grade', 'Puzzle','Solution', 'Full LLM Convo' , 'Grading Process'])
 example = [("""Movie-Genre: epic, superhero, zombie
 Transport: airplane, helicopter, roller
 1. Transport:airplane and Movie-Genre:superhero have different parity positions
@@ -90,15 +90,15 @@ for puzzle in puzzles:
     solver_role_text = (
     "Role: Solve the logic puzzles you are given, assigning each item properly in accordance with the clues. Please explain your logic fully and spell out your train of thought, and format your answer meaningfully and clearly."
 )
-    grader_role_text = ("Role: You are a fair and logical grader of logical puzzles. Grade the attepted solution to the logic puzzle that is given using the answer key. Use the answer key and the given final answer"
-    "to determine the score in the format X/Y.  'X' represents the number of correct assignments in the "
-    "given answer, please make sure to give partial credit (like if only one part of an assignment is correct) and attempt to interpret the solution charitably: for example, if the answer key says 10 and the attempted solution says 10th, tenth, or ten, any of those are correct. Same thing with spelling errors or formatting differences "
-    "and find X even if the answer contains errors. 'Y' is the total number of assignments as per "
-    "the answer key. Provide a detailed explanation of your thought process in calculating both X and Y before you give X and Y."
-    )
+    grader_role_text = (
+    "Role: Grade logic puzzle solutions presented in natural language numerically. Use the answer key, the LLM conversation, "
+    "and the latest natural language output to determine the score in the format X/Y. 'X' represents the number of correct assignments in the "
+    "given answer, including partial credit; attempt to interpret the solution and assess correctness even if the natural language response contains inaccuracies. Please only grade the final puzzle solved. 'Y' is the total number of assignments as per "
+    "the answer key. Provide a detailed explanation of your thought process in calculating both X and Y."
+)
 
-    solver_llm = LLMApi(role=solver_role_text, client_type="HuggingFace")
-    grader_llm = LLMApi(role=grader_role_text)
+    solver_llm = LLMApi(role=solver_role_text, client_type="OpenAI", model="gpt-3.5-turbo-0125",temperature = 0)
+    grader_llm = LLMApi(role=grader_role_text, client_type="OpenAI", model="gpt-4o-2024-05-13",temperature = 0)
     solver = NaiveSolver(solver_llm, example)
     grader = SolverGrader(grader_llm)
     full_response = solver.solve_puzzle(puzzle_description)
@@ -106,13 +106,10 @@ for puzzle in puzzles:
 
     #print(full_response, latest_smt_code, attempted_solution)
     full_convo = solver.getConversation()
-    answer_fixer = AnswerFormatter()
-    obscured_answer_key = answer_fixer.obscure(solution)
-    attempted_solution = answer_fixer.interpret_llm_only(full_convo, obscured_answer_key)
-    grading_full_response, grade = grader.get_grade(solution, attempted_solution)
-    csv_writer.writerow([grade, puzzle_description,obscured_answer_key,solution, attempted_solution, full_response,  grading_full_response])
-    print("Solution:\n", attempted_solution)
-    print("Grading Process: ", grading_full_response)
+    grading_full_response, grade = grader.get_grade(solution, full_convo)
+    csv_writer.writerow([grade, puzzle_description,solution, full_response,  grading_full_response])
+    print("Solution:\n", full_response)
+    print("Full Convo: ", full_convo)
     print("Grade: ", grade)
 
 """

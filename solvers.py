@@ -16,13 +16,14 @@ class BaseClient(ABC):
 
 
 class OpenAIClient(BaseClient):
-    def __init__(self, organization = os.environ["OPENAI_ORG_TOK"], model="gpt-3.5-turbo"):
+    def __init__(self, model="gpt-3.5-turbo", temperature = 0.01, organization = os.environ["OPENAI_ORG_TOK"]):
         self.client = OpenAI(organization=organization)
         self.model = model
+        self.temperature = temperature
 
     def get_response(self, role, conversation_history):
         messages = [{"role": "system", "content": role}] + self.process_conversation_history(conversation_history)
-        response = self.client.chat.completions.create(model=self.model, messages=messages)
+        response = self.client.chat.completions.create(model=self.model, messages=messages, temperature=self.temperature)
         return response.choices[0].message.content
 
     @staticmethod
@@ -34,8 +35,25 @@ class OpenAIClient(BaseClient):
             role = "assistant" if role == "user" else "user"
         return structured_history
     
-class HuggingFaceClient(BaseClient):
-    def __init__(self, api_token= os.environ["HUGGING_FACE_TOK"], model="bigcode/starcoder2-15b"):
+class Llama2Client(BaseClient):
+    def __init__(self, model="meta-llama/Llama-2-7b-chat-hf" , api_token= os.environ["HUGGING_FACE_TOK"]):
+        self.api_url = f"https://api-inference.huggingface.co/models/meta-llama/Llama-2-70b-chat-hf"
+        self.headers = {"Authorization": f"Bearer {api_token}"}
+        self.model = model
+
+    def get_response(self, role, conversation_history):
+        input_text = " ".join(conversation_history)  # You may want to format this differently depending on LLaMA's needs
+        try:
+            response = requests.post(self.api_url, headers=self.headers, json={"inputs": input_text})
+            response.raise_for_status()  # Check for HTTP errors
+            data = response.json()
+            # Adjust the following line based on the actual key in LLaMA's response
+            return data.get("generated_text", "")
+        except requests.exceptions.RequestException as e:
+            return f"Error: {e}"
+
+class Starcoder2Client(BaseClient):
+    def __init__(self, model="bigcode/starcoder2-15b", api_token= os.environ["HUGGING_FACE_TOK"] ):
         self.api_url = f"https://api-inference.huggingface.co/models/{model}"
         self.headers = {"Authorization": f"Bearer {api_token}"}
         self.model = model  # Store model name for tracking
@@ -55,23 +73,43 @@ class LLMApi:
     def __init__(self, role="", client_type="OpenAI", **kwargs):
         if client_type == "OpenAI":
             self.client = OpenAIClient(**kwargs)
-        elif client_type == "HuggingFace":
-            self.client = HuggingFaceClient(**kwargs)
+        elif client_type == "Starcoder":
+            self.client = Starcoder2Client(**kwargs)
+        elif client_type == "Llama":
+            self.client = Llama2Client(**kwargs)
         else:
             raise ValueError("Unsupported client type")
         self.role = role
         self.model = self.client.model  # Use the model from the client
+        self.encoding = tiktoken.encoding_for_model("gpt-4")
         self.tokens_sent = 0
         self.tokens_received = 0
         self.api_call_count = 0
 
     def get_response(self, conversation_history):
-        # Token counting should be adapted if the encoding method changes
+        # Initialize token count for this call
+        tokens_to_send_count = 0
+        
+        # Count tokens for each message in the conversation history
+        for message in conversation_history:
+            tokens = self.encoding.encode(message)
+            tokens_to_send_count += len(tokens)
+
+        # Update the total tokens sent with the tokens for this call
+        self.tokens_sent += tokens_to_send_count
+
+        # Simulate getting a response from the API
         response = self.client.get_response(self.role, conversation_history)
         self.api_call_count += 1
+
+        # Count tokens in the received response
+        tokens_received_count = len(self.encoding.encode(response))
+        self.tokens_received += tokens_received_count
+
         if self.api_call_count >= 2:
             self.update_csv()
             self.api_call_count = 0
+
         return response
 
     def update_csv(self):
@@ -103,9 +141,6 @@ class LLMApi:
         
         self.tokens_sent = 0
         self.tokens_received = 0
-
-    def __del__(self):
-        self.update_csv()
 
 
 
@@ -232,7 +267,8 @@ class PuzzleSolver:
         self.conversation.append(response)
         query = self.extract_substring(response, "(set-logic", "(get-model)").replace('`', '')
         return response, query
-
+    def change_temp(self, new_temp):
+        self.LLMapi.client.temperature = new_temp
     def clear(self):
         self.conversation = self.conversation = [example for example in self.examples] if self.examples else []
     def getConversation(self):
@@ -300,10 +336,12 @@ class SolverGrader:
         self.conversation = [] if not self.example else [self.example, ""]
         self.conv_length = 0 if not example else len(example)
 
-  def get_grade(self, answer_key, llm_answer):
-        to_be_graded = [("Answer to be graded: " + llm_answer + "\nAnswer Key: " +answer_key)]
+  def get_grade(self, answer_key, llm_answer, smt_output= None):
+        smt_solver_output = ("\nSMT-LIB Solver Output: " + smt_output) if smt_output else ""
+        to_be_graded = [("Answer to be graded: " + llm_answer + smt_solver_output + "\nAnswer Key: " +answer_key)]
         response = self.LLMapi.get_response(to_be_graded)
         return response, self.extract_answer(response)
+
 
   def extract_answer(self, s):
         pattern = r'\b(\d{1,3})/(\d{1,3})\b'
@@ -317,13 +355,14 @@ class SolverGrader:
 
 class AnswerFormatter:
   def __init__(self):
-        obscurer_role = "Role: You will be given an answer key. Obscure the answer key so that the formatting and categories are clear (and exactly the same as the original) but the actual answer is COMPLETELY gone and unreadable. DO NOT CHANGE THE FORMATTING OF THE ANSWER KEY. Only output the obscured answer key as a string and nothing else."
-        consistency_checker = "Role: You will be given a list of logic puzzles clues and an attempted solution. Your job is to determine if the attempted solution is consistent with the logic puzzle clues. If it is consistent you can explain why and end with the exact words \"Therefore, it is consistent.\" If it is inconsistent, give a full explanation of which clues and assignments are inconsistent and WHY (be specific) and then end with the exact words \"Therefore, it is inconsistent.\" "
+        obscurer_role = "Role: You will be given an answer key. Obscure the answer key so that the formatting and is clear (and exactly the same as the original) but the actual answers are COMPLETELY gone and unreadable(including punctuation and length of answer). Only column and row names should be visible afterwards, if there are any.  DO NOT CHANGE THE FORMATTING OF THE ANSWER KEY. Only output the obscured answer key as a string and nothing else."
+        consistency_checker_role = "Role: You will be given a list of logic puzzles clues and an attempted solution. Your job is to determine if the attempted solution is consistent with the logic puzzle clues. If it is consistent you can explain why and end with the exact words \"Therefore, it is consistent.\" If it is inconsistent, give a full explanation of which clues and assignments are inconsistent and WHY (be specific) and then end with the exact words \"Therefore, it is inconsistent.\" "
         smt_interpreter_role = "Role: You will be given a blank answer key, an LLM conversation and an SMT output. Use the LLM conversation to interpret the SMT output as faithfully as possible. Fill in the blank answer key using this information, interpretting it as close as you can to the SMT output. DO NOT CHANGE THE FORMATTING OF THE ANSWER KEY. Only output the answer key and nothing else."
         llm_only_interpreter_role = "Role: You will be given a blank answer key and an LLM conversation. Use the LLM conversation to interpret the SMT output as faithfully as possible. Fill in the blank answer key using this information, interpretting it as close as you can to the SMT output. Only output the answer key and nothing else."
         self.obscurer = LLMApi(obscurer_role)
         self.smt_interpreter = LLMApi(smt_interpreter_role)
         self.llm_only_interpreter = LLMApi(llm_only_interpreter_role)
+        self.consistency_checker = LLMApi(consistency_checker_role)
         
         self.conversation = [] 
         self.conv_length = 0
@@ -332,7 +371,7 @@ class AnswerFormatter:
         response = self.obscurer.get_response([answer_key])
         return response
   def check_consistency(self, clues, attempted_solution):
-      response = self.smt_interpreter.get_response([("Puzzle clues: " + clues + "\nAttempted Solution: " + attempted_solution)])
+      response = self.consistency_checker .get_response([("Puzzle clues: " + clues + "\nAttempted Solution: " + attempted_solution)])
       return response
   def interpret_smt(self, convo, smt, obsc_answer_key):
       response = self.smt_interpreter.get_response([("LLM Conversation: " + convo + "\nSMT Output: " + smt + "\nBlank Answer Key: " +obsc_answer_key)])

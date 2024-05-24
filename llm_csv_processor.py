@@ -11,7 +11,7 @@ def calculate_average(csv_file_path):
         for row in reader:
             if len(row) >= 5:  # Check if the 5th column exists
                 try:
-                    fraction = Fraction(row[5])  # Convert 5th column to Fraction
+                    fraction = Fraction(row[-2])  # Convert 5th column to Fraction
                     if abs(fraction - 1) < 0.001:
                         how_many_perfect += 1
                     total += fraction
@@ -29,6 +29,8 @@ def calculate_average(csv_file_path):
         return "No valid data"
 
 # Replace 'yourfile.csv' with your actual file path
-csv_file_path = 'naive/LLM-SMT_log_20240218_100404.csv'
+nodecomp_file = 'LLM-SMT-non-decomp_log_20240331_184935.csv'
+decomp_file = 'test-exp5-3.5-LLM_log_20240524_094700.csv'
+csv_file_path = decomp_file
 average = calculate_average(csv_file_path)
 print("Average:", average)

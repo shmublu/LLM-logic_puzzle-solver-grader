@@ -5,7 +5,7 @@ import os
 from openai import OpenAI
 import datetime
 import csv
-from solvers import NaiveSolver, PuzzleSolver, SolverGrader, PuzzleData, LLMApi 
+from solvers import NaiveSolver, PuzzleSolver, SolverGrader, PuzzleData, LLMApi, Decomposer
 
 def read_file_contents(file_path):
     with open(file_path, 'r') as file:
@@ -39,12 +39,13 @@ def process_puzzles(directory_path):
 
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-csv_file_name = f'LLM-SMT_log_{timestamp}.csv'
+csv_file_name = f'test-exp3-3.5-LLM_log_{timestamp}.csv'
 csv_file = open(csv_file_name, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow(['Puzzle', 'SMT-LIB Code', 'Attempted Solution', 'Full LLM Convo' , 'Grading Process', 'Grade', 'Solution'])
-example = [("""User: Ages, names, lengths
-
+example = [(""" Here is an example puzzle, along with feedback from the theorem prover. Use this type of workflow to answer the puzzle you are presented with. 
+User: 
+Ages, names, lengths
 5, 10, 15, 20
 Barnabas, Bubba, Draco, Merlin
 9.4 feet, 10.2 feet, 12.0 feet, 14.0 feet
@@ -216,12 +217,16 @@ Here's the corrected SMT-LIB code:
     14.0)
 )"""), "I am done."]
 puzzles = process_puzzles("./data/puzzles")
+count = 0
 for puzzle in puzzles:
+
+    print("We are at puzzle " + str(count) + "\n\n")
+    count += 1
     puzzle_description = puzzle.entities + "\n" + puzzle.clues
     solution = puzzle.answers
     print(puzzle_description)
     solver_role_text = (
-    "Role: Encode the logic puzzle given to you into SMT-LIB code, taking into account all explicit and implicit facts; explain your logic and what implicit facts you are encoding. Make sure to set-logic in your code."
+    "Role: Encode the logic puzzle given to you into SMT-LIB code, taking into account all explicit and implicit facts; explain your logic and what implicit facts you are encoding. The questions in the \"Guiding Questions:\" section are not part of the problem and do not need to be answered explicitly but are meant to guide you to a solution. Make sure to set-logic in your code."
     "After encoding, I will submit the last SMT-LIB code you have sent me to an SMT solver for analysis and return to you the output. If there is an error, "
     "carefully correct any syntactical mistakes or misinterpretations of the puzzle constraints in your code. "
     "Continuously refine your code and resubmit to me until I send you back a correct solution that precisely aligns with the puzzle's parameters. "
@@ -231,35 +236,46 @@ for puzzle in puzzles:
     "Role: Grade SMT-LIB solver outputs numerically. Use the answer key, the LLM conversation, the latest solver output "
     "to determine the score in the format X/Y. 'X' represents the number of correct assignments in the "
     "given answer, including partial credit; attempt to interpret the solution and find X even if the SMT model contains errors. Please only grade the final puzzle solved. 'Y' is the total number of assignments as per "
-    "the answer key. Provide a detailed explanation of your thought process in calculating both X and Y."
+    "the answer key. If the answer is blank, provide 0 credit. Provide a detailed explanation of your thought process in calculating both X and Y."
     )
-
-    solver_llm = LLMApi(role=solver_role_text)
-    grader_llm = LLMApi(role=grader_role_text)
+    starting_temp = 0
+    current_solving_model = "gpt-3.5-turbo-0125"
+    solver_llm = LLMApi(role=solver_role_text, client_type="OpenAI", model=current_solving_model, temperature=starting_temp)
+    grader_llm = LLMApi(role=grader_role_text, client_type="OpenAI", model="gpt-4o-2024-05-13", temperature= 0)
     solver = PuzzleSolver(solver_llm,example)
     grader = SolverGrader(grader_llm)
-
+    
     # Use LLMApi to generate SMT-LIB code from the puzzle description
-    max_retries = 5
+    max_retries = 3
     flag = False
-    max_conversation_length = 6
+    max_conversation_length = 4
     latest_smt_code = ""
+    decompose = False
+    if decompose:
+      llm_api_for_decomposer = LLMApi("Role: You are an extremely intelligent teacher whose job it is to identify small pieces of a logic puzzle that are more managable than the whole thing at once. You will be given a complex logic puzzle. Your task is to break it down into smaller, more manageable questions or pieces that, when solved, will help in planning how to provide a complete solution to the puzzle. Provide a list of these questions, and structure them such that they can be used to plan a solution to the overall problem..", client_type="OpenAI", temperature = starting_temp)  # Assume a placeholder role text
+      decomposer = Decomposer(llm_api_for_decomposer)
+      decomposed_questions = decomposer.decompose_puzzle(puzzle_description)
+      decomposed_questions_str = "\n".join(decomposed_questions)
+      
 
     while max_retries > 0 and not flag:
         solver.clear()
-        next_input = puzzle_description
+        next_input = puzzle_description + (("\n\"Guiding Questions:\" " + decomposed_questions_str) if decompose else "")
         try:
             for i in range(max_conversation_length):
                 full_response, smt_lib_code = solver.solve_puzzle(next_input)
                 if smt_lib_code and "(set-logic" in smt_lib_code:
                     latest_smt_code = smt_lib_code
                 next_input = solver.solve_with_z3(latest_smt_code)
-        except:
+        except Exception as e:
             max_retries -= 1
             continue
         if not ("error" in next_input):
             flag = True
+            break
         max_retries -= 1
+        starting_temp = 0.001 if starting_temp == 0 else (0.01 if starting_temp == 0.001 else starting_temp)
+        solver.change_temp(starting_temp)
             
 
     # Solve the puzzle using Z3
