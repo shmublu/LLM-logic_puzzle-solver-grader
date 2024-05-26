@@ -16,15 +16,17 @@ grader_role_text = (
     "Role: Grade SMT-LIB solver outputs numerically. Use the answer key, the LLM conversation, the latest solver output "
     "to determine the score in the format X/Y. 'X' represents the number of correct assignments in the "
     "given answer, including partial credit; attempt to interpret the solution and find X even if the SMT model contains errors. Please only grade the final puzzle solved. 'Y' is the total number of assignments as per "
-    "the answer key. If the answer is blank, provide 0 credit. Provide a detailed explanation of your thought process in calculating both X and Y."
+    "the answer key. If the answer is blank, or do they only provide the clues, give 0 credit. Provide a detailed explanation of your thought process in calculating both X and Y."
     )
 
 decomposer_role_text = (
-    "Role: You are an extremely intelligent teacher whose job it is to identify small pieces of a logic puzzle that are "
-    "more manageable than the whole thing at once. You will be given a complex logic puzzle. Your task is to break it down "
-    "into smaller, more manageable questions or pieces that, when solved, will help in planning how to provide a complete "
-    "solution to the puzzle. Provide a list of these questions, and structure them such that they can be used to plan a "
-    "solution to the overall problem."
+    "Role: As the Decomposer in a multi-agent puzzle-solving team, your task is to strategically analyze and break down complex logic puzzles "
+    "into component sub-problems that are easier to manage. Your objective is to plan the sequence of solving these sub-problems, "
+    "crafting them in a way that each piece logically builds on the previous, paving a clear path to the puzzle’s solution. "
+    "Format these sub-problems into concise, clear statements that help faciliate a full translation of the original puzzle into SMT-LIB code by the Solver agent. "
+    "This structured breakdown not only simplifies the puzzle but also outlines a step-by-step plan that, if followed, "
+    "ensures the systematic resolution of the entire puzzle. Highlight dependencies and prerequisites among the sub-problems to "
+    "aid the Solver in executing the plan efficiently."
 )
 
 solver_role_text_no_smt = (
@@ -261,7 +263,7 @@ class Config:
         self.max_tries = max_tries
         self.max_conversation_length = max_conversation_length
         self.temperatures = temperatures
-        self.csv_name = csv_name if csv_name else f'AAtest-exp-log_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        self.csv_name = csv_name if csv_name else f'test2-exp4-3.5-LLM_log_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
         self.use_smt = use_smt
 
 def read_file_contents(file_path):
@@ -363,5 +365,5 @@ def solve_puzzle(puzzle, config, csv_writer):
 
 
 if __name__ == "__main__":
-    config = Config(solving_model="gpt-3.5-turbo-0125", grading_model="gpt-4o-2024-05-13", use_decomposer=False, decomp_model="gpt-3.5-turbo-0125", max_tries=1, max_conversation_length=4, temperatures=[0, 0.001, 0.01], use_smt=False)
+    config = Config(solving_model="gpt-3.5-turbo-0125", grading_model="gpt-4o-2024-05-13", use_decomposer=True, decomp_model="gpt-3.5-turbo-0125", max_tries=1, max_conversation_length=4, temperatures=[0, 0.001, 0.01], use_smt=True)
     run_puzzles(config)
